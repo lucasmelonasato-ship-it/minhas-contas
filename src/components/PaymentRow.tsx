@@ -17,7 +17,7 @@ import { BillForm } from './BillForm'
 import { displayStatus } from '../lib/status'
 import { formatBRL, formatDayMonth } from '../lib/format'
 import { daysUntil } from '../lib/dates'
-import { undoPaid, skipPayment, unskipPayment } from '../lib/payments'
+import { undoPaid, skipPayment, unskipPayment } from '../data/repo'
 
 function dueHint(p: Payment): string {
   const st = displayStatus(p)
@@ -90,7 +90,7 @@ export function PaymentRow({ payment, bill }: { payment: Payment; bill: Bill | u
           <>
             <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
             <div className="absolute right-0 top-9 z-20 w-52 overflow-hidden rounded-xl border border-ink-100 bg-white py-1 shadow-soft">
-              {payment.receiptId != null && (
+              {payment.receiptPath && (
                 <MenuItem
                   icon={<ImageIcon size={16} />}
                   label="Ver comprovante"
@@ -160,7 +160,7 @@ export function PaymentRow({ payment, bill }: { payment: Payment; bill: Bill | u
       )}
       {showReceipt && (
         <ReceiptViewer
-          receiptId={payment.receiptId}
+          receiptPath={payment.receiptPath}
           open={showReceipt}
           onClose={() => setShowReceipt(false)}
         />

@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import {
   BarChart,
   Bar,
@@ -13,9 +12,8 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { BarChart3, PieChart as PieIcon, Users } from 'lucide-react'
-import { db, type Payment } from '../db/db'
 import { useApp } from '../AppContext'
-import { useBillsMap } from '../hooks'
+import { useBillsMap, useAllPayments, usePeople } from '../hooks'
 import { MonthSwitcher } from '../components/MonthSwitcher'
 import { EmptyState } from '../components/ui'
 import { categoryMeta } from '../lib/categories'
@@ -30,9 +28,9 @@ function compactBRL(cents: number): string {
 
 export default function ReportsPage() {
   const { ym } = useApp()
-  const allPayments = useLiveQuery(() => db.payments.toArray(), [], [] as Payment[])
+  const allPayments = useAllPayments()
   const billsMap = useBillsMap()
-  const people = useLiveQuery(() => db.people.toArray(), [], [])
+  const people = usePeople()
 
   // Evolução dos últimos 6 meses (ancorado no mês selecionado)
   const monthly = useMemo(() => {
@@ -70,7 +68,7 @@ export default function ReportsPage() {
 
   // Por pessoa no mês selecionado
   const byPerson = useMemo(() => {
-    const map = new Map<number | 'none', number>()
+    const map = new Map<string | 'none', number>()
     for (const p of allPayments) {
       if (p.competencia !== ym || p.skipped) continue
       const owner = billsMap.get(p.billId)?.ownerId ?? 'none'

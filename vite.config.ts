@@ -15,7 +15,7 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom'],
           charts: ['recharts'],
-          db: ['dexie', 'dexie-react-hooks'],
+          supabase: ['@supabase/supabase-js'],
         },
       },
     },

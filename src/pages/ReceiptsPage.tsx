@@ -1,23 +1,39 @@
-import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, FileText, Image as ImageIcon } from 'lucide-react'
-import { db, type Receipt } from '../db/db'
+import type { Payment } from '../db/db'
 import { useApp } from '../AppContext'
-import { useBillsMap } from '../hooks'
+import { useAllPayments, useBillsMap } from '../hooks'
+import { receiptSignedUrl } from '../data/repo'
 import { ReceiptViewer } from '../components/ReceiptViewer'
 import { EmptyState } from '../components/ui'
 import { formatBRL } from '../lib/format'
 
-function Thumb({ receipt, onClick, subtitle, title }: {
-  receipt: Receipt
-  onClick: () => void
+function Thumb({
+  payment,
+  title,
+  subtitle,
+  onClick,
+}: {
+  payment: Payment
   title: string
   subtitle: string
+  onClick: () => void
 }) {
-  const url = useMemo(
-    () => (receipt.mime.includes('pdf') ? undefined : URL.createObjectURL(receipt.blob)),
-    [receipt],
-  )
+  const [url, setUrl] = useState<string | undefined>()
+  const isPdf = payment.receiptPath?.toLowerCase().endsWith('.pdf')
+
+  useEffect(() => {
+    let active = true
+    if (payment.receiptPath && !isPdf) {
+      receiptSignedUrl(payment.receiptPath).then((u) => {
+        if (active) setUrl(u)
+      })
+    }
+    return () => {
+      active = false
+    }
+  }, [payment.receiptPath, isPdf])
+
   return (
     <button onClick={onClick} className="group text-left">
       <div className="relative aspect-square overflow-hidden rounded-xl bg-ink-100">
@@ -37,13 +53,15 @@ function Thumb({ receipt, onClick, subtitle, title }: {
 
 export default function ReceiptsPage() {
   const { setTab } = useApp()
-  const receipts = useLiveQuery(() => db.receipts.orderBy('createdAt').reverse().toArray(), [], [])
-  const payments = useLiveQuery(() => db.payments.toArray(), [], [])
+  const payments = useAllPayments()
   const billsMap = useBillsMap()
-  const [viewing, setViewing] = useState<number | undefined>()
+  const [viewing, setViewing] = useState<string | undefined>()
 
-  const paymentById = useMemo(
-    () => new Map(payments.filter((p) => p.id != null).map((p) => [p.id!, p])),
+  const receipts = useMemo(
+    () =>
+      payments
+        .filter((p) => p.receiptPath)
+        .sort((a, b) => (b.paidAt ?? b.createdAt).localeCompare(a.paidAt ?? a.createdAt)),
     [payments],
   )
 
@@ -69,16 +87,15 @@ export default function ReceiptsPage() {
         />
       ) : (
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-          {receipts.map((r) => {
-            const payment = r.paymentId != null ? paymentById.get(r.paymentId) : undefined
-            const bill = payment ? billsMap.get(payment.billId) : undefined
+          {receipts.map((p) => {
+            const bill = billsMap.get(p.billId)
             return (
               <Thumb
-                key={r.id}
-                receipt={r}
-                title={bill?.name ?? r.filename}
-                subtitle={payment ? formatBRL(payment.paidAmount ?? payment.amount) : ''}
-                onClick={() => setViewing(r.id)}
+                key={p.id}
+                payment={p}
+                title={bill?.name ?? 'Conta'}
+                subtitle={formatBRL(p.paidAmount ?? p.amount)}
+                onClick={() => setViewing(p.receiptPath)}
               />
             )
           })}
@@ -86,7 +103,7 @@ export default function ReceiptsPage() {
       )}
 
       {viewing != null && (
-        <ReceiptViewer receiptId={viewing} open={viewing != null} onClose={() => setViewing(undefined)} />
+        <ReceiptViewer receiptPath={viewing} open={viewing != null} onClose={() => setViewing(undefined)} />
       )}
     </div>
   )

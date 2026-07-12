@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Camera, Check, FileText, Paperclip, Trash2 } from 'lucide-react'
-import { db, type Bill, type Payment } from '../db/db'
-import { markPaid } from '../lib/payments'
+import { type Bill, type Payment } from '../db/db'
+import { markPaid } from '../data/repo'
+import { usePeople } from '../hooks'
 import { formatBRL } from '../lib/format'
 import { todayISO } from '../lib/dates'
 import { Modal } from './ui'
@@ -19,9 +19,9 @@ export function PayModal({
   open: boolean
   onClose: () => void
 }) {
-  const people = useLiveQuery(() => db.people.toArray(), [], [])
+  const people = usePeople()
   const [amount, setAmount] = useState(payment.amount)
-  const [paidById, setPaidById] = useState<number | undefined>(
+  const [paidById, setPaidById] = useState<string | undefined>(
     payment.paidById ?? bill?.ownerId,
   )
   const [paidAt, setPaidAt] = useState(todayISO())
@@ -31,10 +31,9 @@ export function PayModal({
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function handleSave() {
-    if (payment.id == null) return
     setSaving(true)
     try {
-      await markPaid(payment.id, {
+      await markPaid(payment, {
         paidAmount: amount,
         paidById,
         paidAt: new Date(paidAt + 'T12:00:00').toISOString(),
@@ -42,6 +41,9 @@ export function PayModal({
         receiptFile: file,
       })
       onClose()
+    } catch (e) {
+      console.error(e)
+      alert('Não foi possível registrar o pagamento. Verifique sua conexão.')
     } finally {
       setSaving(false)
     }
@@ -95,7 +97,7 @@ export function PayModal({
             <select
               className="input"
               value={paidById ?? ''}
-              onChange={(e) => setPaidById(e.target.value ? Number(e.target.value) : undefined)}
+              onChange={(e) => setPaidById(e.target.value || undefined)}
             >
               <option value="">—</option>
               {people.map((p) => (

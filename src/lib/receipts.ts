@@ -1,12 +1,12 @@
-// Redimensiona/comprime a imagem do comprovante antes de guardar, para não
-// encher o armazenamento do aparelho. PDFs e outros formatos passam intactos.
+// Redimensiona/comprime a imagem do comprovante antes de enviar, para não
+// gastar armazenamento à toa. PDFs e outros formatos passam intactos.
 
 const MAX_DIMENSION = 1600
 const JPEG_QUALITY = 0.82
 
 export async function processReceiptFile(file: File): Promise<Blob> {
   if (!file.type.startsWith('image/')) {
-    return file // PDF etc — guarda como está
+    return file // PDF etc — envia como está
   }
   try {
     const bitmap = await createImageBitmap(file)
@@ -30,10 +30,4 @@ export async function processReceiptFile(file: File): Promise<Blob> {
   } catch {
     return file
   }
-}
-
-/** Cria uma URL temporária para exibir um Blob e a revoga depois. */
-export function useObjectUrl(blob: Blob | undefined): string | undefined {
-  if (!blob) return undefined
-  return URL.createObjectURL(blob)
 }

@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Repeat, CreditCard, CalendarClock } from 'lucide-react'
 import {
-  db,
   type Bill,
   type BillType,
   type CategoryKey,
@@ -13,10 +11,13 @@ import { CategoryIcon } from './CategoryIcon'
 import { Modal } from './ui'
 import { MoneyInput } from './MoneyInput'
 import { previewOccurrences } from '../lib/occurrences'
-import { ensureMonth } from '../lib/occurrences'
+import { addBill, updateBill, ensureMonthPayments } from '../data/repo'
+import { usePeople } from '../hooks'
 import { currentYM, parseYM, toYM } from '../lib/dates'
 import { formatBRL, formatMonthShort } from '../lib/format'
 import { useApp } from '../AppContext'
+
+type BillDraft = Omit<Bill, 'id' | 'createdAt'>
 
 const TYPES: { key: BillType; label: string; icon: typeof Repeat; hint: string }[] = [
   { key: 'recorrente', label: 'Recorrente', icon: Repeat, hint: 'Repete todo mês (ou ano)' },
@@ -31,10 +32,10 @@ interface FormState {
   amount: number
   frequency: Frequency
   dueDay: number
-  startMonthInput: string // 'YYYY-MM'
-  dueDateInput: string // 'YYYY-MM-DD' (avulsa)
+  startMonthInput: string
+  dueDateInput: string
   installmentsTotal: number
-  ownerId?: number
+  ownerId?: string
   autopay: boolean
   notes: string
   active: boolean
@@ -91,7 +92,7 @@ export function BillForm({
   bill?: Bill
 }) {
   const { ym } = useApp()
-  const people = useLiveQuery(() => db.people.toArray(), [], [])
+  const people = usePeople()
   const [f, setF] = useState<FormState>(() => billToForm(bill))
   const [saving, setSaving] = useState(false)
 
@@ -99,8 +100,7 @@ export function BillForm({
     setF((prev) => ({ ...prev, [key]: value }))
   }
 
-  // Monta um Bill a partir do formulário para pré-visualizar as ocorrências.
-  const draft = useMemo<Bill>(() => {
+  const draft = useMemo<BillDraft>(() => {
     const start = parseYM(f.startMonthInput)
     let dueDay = f.dueDay
     let dueMonth: number | undefined
@@ -134,9 +134,8 @@ export function BillForm({
       autopay: f.autopay,
       notes: f.notes,
       active: f.active,
-      createdAt: bill?.createdAt ?? new Date().toISOString(),
     }
-  }, [f, bill])
+  }, [f])
 
   const preview = useMemo(
     () => previewOccurrences(draft, f.startMonthInput, f.type === 'avulsa' ? 1 : 4),
@@ -149,16 +148,18 @@ export function BillForm({
     if (!f.name.trim() || f.amount <= 0) return
     setSaving(true)
     try {
-      const payload = { ...draft, name: f.name.trim() }
-      if (bill?.id != null) {
-        await db.bills.update(bill.id, payload)
+      const payload: BillDraft = { ...draft, name: f.name.trim() }
+      if (bill?.id) {
+        await updateBill(bill.id, payload)
       } else {
-        await db.bills.add(payload)
+        await addBill(payload)
       }
-      // Materializa ocorrências no mês visível e no atual para aparecerem já.
-      await ensureMonth(ym)
-      await ensureMonth(currentYM())
+      await ensureMonthPayments(ym)
+      await ensureMonthPayments(currentYM())
       onClose()
+    } catch (e) {
+      console.error(e)
+      alert('Não foi possível salvar. Verifique sua conexão e tente de novo.')
     } finally {
       setSaving(false)
     }
@@ -401,10 +402,7 @@ export function BillForm({
             </p>
             <div className="flex flex-wrap gap-1.5">
               {preview.map((o) => (
-                <span
-                  key={o.ym}
-                  className="chip bg-white text-xs text-ink-600 shadow-card"
-                >
+                <span key={o.ym} className="chip bg-white text-xs text-ink-600 shadow-card">
                   {formatMonthShort(o.ym)}
                   {o.installmentNumber ? ` · ${o.installmentNumber}/${f.installmentsTotal}` : ''}
                 </span>

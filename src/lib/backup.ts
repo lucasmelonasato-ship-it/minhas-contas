@@ -1,105 +1,105 @@
-import { db, type Receipt } from '../db/db'
-import { triggerDownload } from './ics'
+import { supabase } from './supabase'
+import { getBills, getAllPayments, getPeople } from '../data/repo'
+import { bumpData } from '../data/store'
+import type { Bill, Payment, Person } from '../db/db'
 
-// Backup completo em JSON. Como os comprovantes são imagens (Blob), eles são
-// convertidos para base64 na exportação e reconstruídos na importação.
+// Backup dos dados (pessoas, contas e pagamentos) em JSON. Os comprovantes em si
+// ficam guardados com segurança na nuvem (Storage) e não vão no arquivo.
 
-interface ReceiptExport extends Omit<Receipt, 'blob'> {
-  blobBase64: string
-}
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 interface BackupFile {
   app: 'minhas-contas'
   version: number
   exportedAt: string
-  people: unknown[]
-  bills: unknown[]
-  payments: unknown[]
-  receipts: ReceiptExport[]
-  settings: unknown[]
+  people: Person[]
+  bills: Bill[]
+  payments: Payment[]
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '')
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
-}
-
-function base64ToBlob(base64: string, mime: string): Blob {
-  const bin = atob(base64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return new Blob([bytes], { type: mime })
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
 export async function exportBackup(): Promise<void> {
-  const [people, bills, payments, receipts, settings] = await Promise.all([
-    db.people.toArray(),
-    db.bills.toArray(),
-    db.payments.toArray(),
-    db.receipts.toArray(),
-    db.settings.toArray(),
+  const [people, bills, payments] = await Promise.all([
+    getPeople(),
+    getBills(),
+    getAllPayments(),
   ])
-
-  const receiptsExport: ReceiptExport[] = await Promise.all(
-    receipts.map(async (r) => {
-      const { blob, ...rest } = r
-      return { ...rest, blobBase64: await blobToBase64(blob) }
-    }),
-  )
-
   const data: BackupFile = {
     app: 'minhas-contas',
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     people,
     bills,
     payments,
-    receipts: receiptsExport,
-    settings,
   }
-
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
-  const stamp = new Date().toISOString().slice(0, 10)
-  triggerDownload(blob, `backup-minhas-contas-${stamp}.json`)
+  triggerDownload(blob, `backup-minhas-contas-${new Date().toISOString().slice(0, 10)}.json`)
 }
 
-/** Substitui todos os dados pelo conteúdo do backup. */
 export async function importBackup(file: File): Promise<void> {
-  const text = await file.text()
-  const data = JSON.parse(text) as BackupFile
-  if (data.app !== 'minhas-contas') {
-    throw new Error('Arquivo de backup inválido.')
+  const data = JSON.parse(await file.text()) as BackupFile
+  if (data.app !== 'minhas-contas') throw new Error('Arquivo de backup inválido.')
+
+  const peopleRows = (data.people ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    color: p.color,
+  }))
+  const billRows = (data.bills ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    category: b.category,
+    type: b.type,
+    amount: b.amount,
+    frequency: b.frequency ?? null,
+    due_day: b.dueDay,
+    due_month: b.dueMonth ?? null,
+    due_year: b.dueYear ?? null,
+    start_year: b.startYear,
+    start_month: b.startMonth,
+    installments_total: b.installmentsTotal ?? null,
+    owner_id: b.ownerId ?? null,
+    autopay: b.autopay,
+    notes: b.notes ?? null,
+    active: b.active,
+  }))
+  const paymentRows = (data.payments ?? []).map((p) => ({
+    id: p.id,
+    bill_id: p.billId,
+    competencia: p.competencia,
+    due_date: p.dueDate,
+    amount: p.amount,
+    paid: p.paid,
+    paid_at: p.paidAt ?? null,
+    paid_amount: p.paidAmount ?? null,
+    paid_by_id: p.paidById ?? null,
+    receipt_path: p.receiptPath ?? null,
+    installment_number: p.installmentNumber ?? null,
+    skipped: p.skipped ?? false,
+    notes: p.notes ?? null,
+  }))
+
+  if (peopleRows.length) {
+    const { error } = await supabase.from('people').upsert(peopleRows)
+    if (error) throw error
   }
-
-  const receipts: Receipt[] = (data.receipts ?? []).map((r) => {
-    const { blobBase64, ...rest } = r
-    return { ...rest, blob: base64ToBlob(blobBase64, rest.mime) }
-  })
-
-  await db.transaction(
-    'rw',
-    db.people,
-    db.bills,
-    db.payments,
-    db.receipts,
-    db.settings,
-    async () => {
-      await Promise.all([
-        db.people.clear(),
-        db.bills.clear(),
-        db.payments.clear(),
-        db.receipts.clear(),
-        db.settings.clear(),
-      ])
-      await db.people.bulkAdd(data.people as never[])
-      await db.bills.bulkAdd(data.bills as never[])
-      await db.payments.bulkAdd(data.payments as never[])
-      if (receipts.length) await db.receipts.bulkAdd(receipts as never[])
-      await db.settings.bulkAdd((data.settings ?? []) as never[])
-    },
-  )
+  if (billRows.length) {
+    const { error } = await supabase.from('bills').upsert(billRows)
+    if (error) throw error
+  }
+  if (paymentRows.length) {
+    const { error } = await supabase.from('payments').upsert(paymentRows)
+    if (error) throw error
+  }
+  bumpData()
 }

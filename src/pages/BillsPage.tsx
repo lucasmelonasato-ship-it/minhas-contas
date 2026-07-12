@@ -1,23 +1,13 @@
 import { useMemo, useState } from 'react'
 import { ListChecks, Plus, Pencil, Trash2, Power, Zap } from 'lucide-react'
-import { db, type Bill } from '../db/db'
+import { type Bill } from '../db/db'
 import { useBills } from '../hooks'
+import { deleteBill, updateBill } from '../data/repo'
 import { BillForm } from '../components/BillForm'
 import { CategoryChip } from '../components/CategoryIcon'
 import { EmptyState } from '../components/ui'
 import { categoryMeta } from '../lib/categories'
 import { formatBRL } from '../lib/format'
-
-async function deleteBillCascade(bill: Bill) {
-  if (bill.id == null) return
-  const payments = await db.payments.where('billId').equals(bill.id).toArray()
-  const receiptIds = payments.map((p) => p.receiptId).filter((r): r is number => r != null)
-  await db.transaction('rw', db.bills, db.payments, db.receipts, async () => {
-    if (receiptIds.length) await db.receipts.bulkDelete(receiptIds)
-    await db.payments.where('billId').equals(bill.id!).delete()
-    await db.bills.delete(bill.id!)
-  })
-}
 
 function typeLabel(bill: Bill): string {
   if (bill.type === 'parcelado') return `${bill.installmentsTotal}x parcelado`
@@ -121,7 +111,7 @@ export default function BillsPage() {
                   </span>
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => db.bills.update(bill.id!, { active: !bill.active })}
+                      onClick={() => updateBill(bill.id, { active: !bill.active })}
                       className="rounded-lg p-1.5 text-ink-300 hover:bg-ink-100 hover:text-ink-600"
                       title={bill.active ? 'Desativar' : 'Ativar'}
                     >
@@ -178,7 +168,7 @@ export default function BillsPage() {
               </button>
               <button
                 onClick={async () => {
-                  await deleteBillCascade(confirmDelete)
+                  await deleteBill(confirmDelete.id)
                   setConfirmDelete(null)
                 }}
                 className="btn-danger flex-1 py-2.5"

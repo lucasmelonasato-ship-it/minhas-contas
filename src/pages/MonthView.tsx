@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { CalendarPlus, Filter, Plus } from 'lucide-react'
-import { db } from '../db/db'
 import { useApp } from '../AppContext'
-import { useBillsMap, useMonthPayments } from '../hooks'
+import { useBillsMap, useMonthPayments, usePeople } from '../hooks'
 import { MonthSwitcher } from '../components/MonthSwitcher'
 import { PaymentRow } from '../components/PaymentRow'
 import { BillForm } from '../components/BillForm'
@@ -25,9 +23,9 @@ export default function MonthView() {
   const { ym } = useApp()
   const payments = useMonthPayments(ym)
   const billsMap = useBillsMap()
-  const people = useLiveQuery(() => db.people.toArray(), [], [])
+  const people = usePeople()
   const [showForm, setShowForm] = useState(false)
-  const [ownerFilter, setOwnerFilter] = useState<number | 'all'>('all')
+  const [ownerFilter, setOwnerFilter] = useState<string | 'all'>('all')
 
   const filtered = useMemo(() => {
     if (ownerFilter === 'all') return payments
@@ -89,7 +87,7 @@ export default function MonthView() {
           {people.map((p) => (
             <button
               key={p.id}
-              onClick={() => setOwnerFilter(p.id!)}
+              onClick={() => setOwnerFilter(p.id)}
               className="chip shrink-0 border"
               style={
                 ownerFilter === p.id

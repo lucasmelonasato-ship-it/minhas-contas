@@ -1,24 +1,29 @@
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Bill, type Payment } from './db/db'
+import type { Bill, Payment, Person } from './db/db'
+import { useQuery } from './data/store'
+import { getBills, getMonthPayments, getPeople, getAllPayments } from './data/repo'
 
-/** Mapa id -> Bill, sempre atualizado. */
-export function useBillsMap(): Map<number, Bill> {
-  const bills = useLiveQuery(() => db.bills.toArray(), [], [] as Bill[])
-  return new Map(bills.filter((b) => b.id != null).map((b) => [b.id as number, b]))
+/** Todas as contas cadastradas (ordenadas por nome). */
+export function useBills(): Bill[] {
+  return useQuery(() => getBills(), [], [] as Bill[])
+}
+
+/** Mapa id -> Bill. */
+export function useBillsMap(): Map<string, Bill> {
+  const bills = useBills()
+  return new Map(bills.map((b) => [b.id, b]))
 }
 
 /** Pagamentos (ocorrências) de uma competência 'YYYY-MM'. */
 export function useMonthPayments(ym: string): Payment[] {
-  return (
-    useLiveQuery(
-      () => db.payments.where('competencia').equals(ym).toArray(),
-      [ym],
-      [] as Payment[],
-    ) ?? []
-  )
+  return useQuery(() => getMonthPayments(ym), [ym], [] as Payment[])
 }
 
-/** Todas as contas cadastradas. */
-export function useBills(): Bill[] {
-  return useLiveQuery(() => db.bills.orderBy('name').toArray(), [], [] as Bill[]) ?? []
+/** Todos os pagamentos (para relatórios). */
+export function useAllPayments(): Payment[] {
+  return useQuery(() => getAllPayments(), [], [] as Payment[])
+}
+
+/** Pessoas (Lucas, Gabi, …). */
+export function usePeople(): Person[] {
+  return useQuery(() => getPeople(), [], [] as Person[])
 }

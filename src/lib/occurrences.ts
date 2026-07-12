@@ -1,10 +1,9 @@
-import { db, type Bill, type Payment } from '../db/db'
+import type { Bill } from '../db/db'
 import { buildDueDate, monthsBetween, parseYM } from './dates'
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  A partir das contas cadastradas (Bill), materializamos as ocorrências de
-//  pagamento (Payment) de um determinado mês sob demanda. Assim o usuário só
-//  cadastra a conta uma vez e o app gera automaticamente o que vence em cada mês.
+//  Lógica pura de ocorrências: dada uma conta e um mês, calcula se ela incide
+//  e qual o vencimento. A materialização (gravar no banco) fica em data/repo.ts.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Occurrence {
@@ -12,14 +11,12 @@ interface Occurrence {
   installmentNumber?: number
 }
 
-/**
- * Decide se uma conta possui ocorrência no mês informado e devolve os dados
- * do vencimento. Retorna null quando a conta não incide naquele mês.
- */
-export function occurrenceFor(bill: Bill, ym: string): Occurrence | null {
+type OccInput = Omit<Bill, 'id' | 'createdAt'>
+
+export function occurrenceFor(bill: OccInput, ym: string): Occurrence | null {
   const { year, month } = parseYM(ym)
   const startDiff = monthsBetween(bill.startYear, bill.startMonth, year, month)
-  if (startDiff < 0) return null // mês anterior ao início da conta
+  if (startDiff < 0) return null
 
   if (bill.type === 'recorrente') {
     if (bill.frequency === 'anual') {
@@ -27,20 +24,18 @@ export function occurrenceFor(bill: Bill, ym: string): Occurrence | null {
       if (month !== anniversaryMonth) return null
       return { dueDate: buildDueDate(year, month, bill.dueDay) }
     }
-    // mensal (padrão)
     return { dueDate: buildDueDate(year, month, bill.dueDay) }
   }
 
   if (bill.type === 'parcelado') {
     const total = bill.installmentsTotal ?? 1
-    if (startDiff >= total) return null // já quitado
+    if (startDiff >= total) return null
     return {
       dueDate: buildDueDate(year, month, bill.dueDay),
       installmentNumber: startDiff + 1,
     }
   }
 
-  // avulsa — ocorre uma única vez no mês/ano definido
   if (bill.type === 'avulsa') {
     if (bill.dueYear === year && bill.dueMonth === month) {
       return { dueDate: buildDueDate(year, month, bill.dueDay) }
@@ -51,48 +46,9 @@ export function occurrenceFor(bill: Bill, ym: string): Occurrence | null {
   return null
 }
 
-/**
- * Garante que existam registros de Payment para todas as contas ativas com
- * ocorrência no mês. Não recria pagamentos já existentes (pagos, pulados ou
- * pendentes) — assim o estado que o usuário definiu é preservado.
- */
-export async function ensureMonth(ym: string): Promise<void> {
-  // Booleanos não são bem indexáveis no IndexedDB; filtramos em memória.
-  const active = (await db.bills.toArray()).filter((b) => b.active)
-
-  const existing = await db.payments.where('competencia').equals(ym).toArray()
-  const existingByBill = new Set(existing.map((p) => p.billId))
-
-  const toCreate: Payment[] = []
-  const now = new Date().toISOString()
-
-  for (const bill of active) {
-    if (bill.id == null) continue
-    if (existingByBill.has(bill.id)) continue
-    const occ = occurrenceFor(bill, ym)
-    if (!occ) continue
-    toCreate.push({
-      billId: bill.id,
-      competencia: ym,
-      dueDate: occ.dueDate,
-      amount: bill.amount,
-      paid: false,
-      installmentNumber: occ.installmentNumber,
-      createdAt: now,
-    })
-  }
-
-  if (toCreate.length) {
-    await db.payments.bulkAdd(toCreate)
-  }
-}
-
-/**
- * Gera (sem persistir) uma prévia das próximas N ocorrências de uma conta —
- * útil na tela de cadastro para o usuário conferir o que será lançado.
- */
+/** Prévia (sem gravar) das próximas N ocorrências — usada no cadastro. */
 export function previewOccurrences(
-  bill: Bill,
+  bill: OccInput,
   fromYM: string,
   count = 6,
 ): { ym: string; dueDate: string; installmentNumber?: number }[] {

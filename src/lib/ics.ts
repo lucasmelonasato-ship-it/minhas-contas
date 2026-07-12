@@ -1,22 +1,31 @@
-import { db, type Payment } from '../db/db'
+import type { Payment } from '../db/db'
+import { getBills } from '../data/repo'
 import { formatBRL } from './format'
 
-// Gera um arquivo .ics (padrão iCalendar) com os vencimentos como eventos de
-// dia inteiro e um alarme no dia anterior. Ao abrir no iPhone, o usuário pode
-// adicionar tudo ao Calendário nativo — que dispara lembretes de forma confiável.
+// Gera um arquivo .ics (iCalendar) com os vencimentos como eventos de dia inteiro
+// e alarmes. Ao abrir no iPhone, dá pra adicionar tudo ao Calendário nativo, que
+// dispara os lembretes de forma confiável.
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0')
+export function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
 function icsDate(iso: string): string {
-  return iso.replace(/-/g, '') // 'YYYYMMDD'
+  return iso.replace(/-/g, '')
 }
 
 function nextDay(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number)
   const dt = new Date(y, m - 1, d + 1)
-  return `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}`
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}${p(dt.getMonth() + 1)}${p(dt.getDate())}`
 }
 
 function escapeText(s: string): string {
@@ -24,10 +33,9 @@ function escapeText(s: string): string {
 }
 
 export async function buildICS(payments: Payment[]): Promise<string> {
-  const bills = await db.bills.toArray()
+  const bills = await getBills()
   const billName = new Map(bills.map((b) => [b.id, b.name]))
-  const stamp =
-    new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
 
   const lines: string[] = [
     'BEGIN:VCALENDAR',
@@ -44,7 +52,7 @@ export async function buildICS(payments: Payment[]): Promise<string> {
     const title = `💸 ${name} — ${formatBRL(p.amount)}`
     lines.push(
       'BEGIN:VEVENT',
-      `UID:minhas-contas-${p.id}-${p.competencia}@local`,
+      `UID:minhas-contas-${p.id}@local`,
       `DTSTAMP:${stamp}`,
       `DTSTART;VALUE=DATE:${icsDate(p.dueDate)}`,
       `DTEND;VALUE=DATE:${nextDay(p.dueDate)}`,
@@ -72,15 +80,4 @@ export async function downloadICS(payments: Payment[], filename: string): Promis
   const ics = await buildICS(payments)
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
   triggerDownload(blob, filename)
-}
-
-export function triggerDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 2000)
 }

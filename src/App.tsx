@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import {
   Home,
   CalendarDays,
@@ -8,9 +9,11 @@ import {
   Wallet,
 } from 'lucide-react'
 import { AppContext, type Tab } from './AppContext'
-import { ensureSeed } from './db/db'
-import { ensureMonth } from './lib/occurrences'
+import { supabase } from './lib/supabase'
+import { seedPeopleIfEmpty, ensureMonthPayments } from './data/repo'
+import { startAutoRefresh } from './data/store'
 import { addMonthsYM, currentYM } from './lib/dates'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import MonthView from './pages/MonthView'
 import BillsPage from './pages/BillsPage'
@@ -27,41 +30,71 @@ const NAV: { tab: Tab; label: string; icon: typeof Home }[] = [
   { tab: 'ajustes', label: 'Ajustes', icon: SettingsIcon },
 ]
 
+function Splash({ text }: { text: string }) {
+  return (
+    <div className="grid min-h-screen place-items-center bg-ink-50">
+      <div className="flex flex-col items-center gap-3 text-ink-400">
+        <Wallet size={40} className="animate-pulse text-brand-500" />
+        <p className="text-sm font-medium">{text}</p>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('inicio')
   const [ym, setYm] = useState<string>(currentYM())
-  const [ready, setReady] = useState(false)
+  const [session, setSession] = useState<Session | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [dataReady, setDataReady] = useState(false)
 
-  // Semeia dados iniciais e garante as ocorrências do mês atual e vizinhos.
+  // Sessão de login
   useEffect(() => {
-    ;(async () => {
-      await ensureSeed()
-      const current = currentYM()
-      await ensureMonth(addMonthsYM(current, -1))
-      await ensureMonth(current)
-      await ensureMonth(addMonthsYM(current, 1))
-      setReady(true)
-    })()
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      setAuthReady(true)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s)
+      setAuthReady(true)
+    })
+    return () => sub.subscription.unsubscribe()
   }, [])
 
-  // Sempre que o mês visível muda, materializa as ocorrências daquele mês.
+  // Ao logar: semear pessoas, materializar meses e ligar a atualização automática
   useEffect(() => {
-    if (!ready) return
-    ensureMonth(ym)
-  }, [ym, ready])
+    if (!session) {
+      setDataReady(false)
+      return
+    }
+    let stop: (() => void) | undefined
+    ;(async () => {
+      try {
+        await seedPeopleIfEmpty()
+        const cur = currentYM()
+        await ensureMonthPayments(addMonthsYM(cur, -1))
+        await ensureMonthPayments(cur)
+        await ensureMonthPayments(addMonthsYM(cur, 1))
+      } catch (e) {
+        console.error('Inicialização:', e)
+      } finally {
+        setDataReady(true)
+        stop = startAutoRefresh()
+      }
+    })()
+    return () => stop?.()
+  }, [session])
+
+  // Ao trocar o mês visível, garante as ocorrências daquele mês
+  useEffect(() => {
+    if (session && dataReady) ensureMonthPayments(ym)
+  }, [ym, session, dataReady])
 
   const ctx = useMemo(() => ({ ym, setYm, tab, setTab }), [ym, tab])
 
-  if (!ready) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-ink-50">
-        <div className="flex flex-col items-center gap-3 text-ink-400">
-          <Wallet size={40} className="animate-pulse text-brand-500" />
-          <p className="text-sm font-medium">Carregando suas contas…</p>
-        </div>
-      </div>
-    )
-  }
+  if (!authReady) return <Splash text="Carregando…" />
+  if (!session) return <Login />
+  if (!dataReady) return <Splash text="Sincronizando suas contas…" />
 
   return (
     <AppContext.Provider value={ctx}>
@@ -97,9 +130,7 @@ export default function App() {
               )
             })}
           </nav>
-          <div className="mt-auto px-2 text-xs text-ink-300">
-            v1.0 · seus dados ficam neste aparelho
-          </div>
+          <div className="mt-auto px-2 text-xs text-ink-300">v2.0 · sincronizado na nuvem</div>
         </aside>
 
         {/* Conteúdo */}
